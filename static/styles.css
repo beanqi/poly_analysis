@@ -97,6 +97,14 @@ h1, h2 {
   margin-bottom: 16px;
 }
 
+.panel-header-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .panel-actions {
   margin-top: 14px;
   display: flex;
@@ -150,6 +158,19 @@ h1, h2 {
 .ghost-button[disabled] {
   opacity: 0.65;
   cursor: not-allowed;
+}
+
+.danger-button {
+  background: rgba(163, 77, 45, 0.14);
+}
+
+.status-text {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status-text.is-error {
+  color: #8d2c1f;
 }
 
 .charts {

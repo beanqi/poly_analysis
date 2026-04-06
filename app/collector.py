@@ -30,6 +30,7 @@ class CollectorService:
 
     async def start(self) -> None:
         self._stop_event.clear()
+        self._reset_runtime_state()
         await self.client.connect()
         self._tasks = [
             asyncio.create_task(self._discovery_loop(), name="poly-discovery"),
@@ -211,3 +212,9 @@ class CollectorService:
         except RuntimeError:
             return
         loop.create_task(self.realtime_hub.publish(message))
+
+    def _reset_runtime_state(self) -> None:
+        self._subscription_version = 0
+        self._desired_assets.clear()
+        self._asset_to_condition.clear()
+        self._dirty_conditions.clear()

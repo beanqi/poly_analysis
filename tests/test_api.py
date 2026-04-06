@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from app.api import create_app
@@ -124,3 +126,34 @@ def test_dashboard_endpoints_return_expected_shape(tmp_path):
         80,
         90,
     ]
+
+
+def test_archive_endpoint_moves_current_data_into_archive_and_resets_db(tmp_path):
+    db_path = tmp_path / "app.db"
+    db = Database(db_path)
+    seed(db)
+    client = TestClient(create_app(database=db, enable_collector=False))
+
+    response = client.post("/api/archive")
+
+    assert response.status_code == 200
+    payload = response.json()
+    archive_path = Path(payload["archive_path"])
+    assert archive_path.exists()
+    assert archive_path.parent == tmp_path / "archive"
+    assert payload["active_db_path"] == str(db_path)
+
+    archived_db = Database(archive_path)
+    assert len(archived_db.list_events()) == 1
+    assert len(archived_db.list_trades()) == 3
+
+    assert db.list_events() == []
+    assert db.list_trades() == []
+
+    events_resp = client.get("/api/events")
+    assert events_resp.status_code == 200
+    assert events_resp.json()["events"] == []
+
+    stats_resp = client.get("/api/stats")
+    assert stats_resp.status_code == 200
+    assert stats_resp.json()["meta"]["event_count"] == 0

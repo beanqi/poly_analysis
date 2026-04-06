@@ -11,6 +11,8 @@ const yesChartTitle = document.getElementById("yes-chart-title");
 const noChartTitle = document.getElementById("no-chart-title");
 const tradeTableBody = document.getElementById("trade-table-body");
 const statsGroups = document.getElementById("stats-groups");
+const archiveButton = document.getElementById("archive-button");
+const archiveStatus = document.getElementById("archive-status");
 
 const chartOptions = {
   layout: {
@@ -58,12 +60,23 @@ let showAllEvents = false;
 
 const VISIBLE_EVENT_COUNT = 10;
 
-async function fetchJson(url) {
-  const response = await fetch(url);
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, options);
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    let detail = `HTTP ${response.status}`;
+    try {
+      const payload = await response.json();
+      detail = payload.detail || detail;
+    } catch (error) {
+      // Ignore JSON parse failures and fall back to the status code.
+    }
+    throw new Error(detail);
   }
   return response.json();
+}
+
+async function fetchJson(url) {
+  return requestJson(url);
 }
 
 function chooseDefaultEvent(events) {
@@ -91,6 +104,11 @@ function formatTs(timestamp) {
 
 function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function setArchiveStatus(message, isError = false) {
+  archiveStatus.textContent = message;
+  archiveStatus.classList.toggle("is-error", isError);
 }
 
 function isSelectedInHistory(events) {
@@ -264,6 +282,10 @@ function renderStats(groups) {
 
 async function loadEventDetail() {
   if (!selectedEventSlug) {
+    selectedTitle.textContent = "K 线";
+    selectedRange.textContent = "暂无选中事件";
+    yesChartTitle.textContent = "YES";
+    noChartTitle.textContent = "NO";
     yesSeries.setData([]);
     noSeries.setData([]);
     tradeTableBody.innerHTML = "";
@@ -332,6 +354,33 @@ async function refreshWithoutStats() {
     await loadEventDetail();
   } catch (error) {
     console.error(error);
+  }
+}
+
+async function archiveData() {
+  const confirmed = window.confirm(
+    "这会把当前 SQLite 数据归档到单独文件，并从空库重新开始统计。确认继续吗？",
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  archiveButton.disabled = true;
+  archiveButton.textContent = "归档中...";
+  setArchiveStatus("正在归档当前数据...");
+
+  try {
+    const payload = await requestJson("/api/archive", { method: "POST" });
+    showAllEvents = false;
+    selectedEventSlug = null;
+    await refresh();
+    setArchiveStatus(`已归档到 ${payload.archive_file}，当前统计已重置。`);
+  } catch (error) {
+    console.error(error);
+    setArchiveStatus(`归档失败：${error.message}`, true);
+  } finally {
+    archiveButton.disabled = false;
+    archiveButton.textContent = "归档并重置统计";
   }
 }
 
@@ -409,6 +458,9 @@ const resizeCharts = () => {
 };
 
 window.addEventListener("resize", resizeCharts);
+archiveButton.addEventListener("click", () => {
+  void archiveData();
+});
 
 await refresh();
 resizeCharts();

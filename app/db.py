@@ -62,6 +62,22 @@ class Database:
                 """
             )
 
+    def archive_and_reset(self, destination: Path) -> None:
+        destination = Path(destination)
+        if destination == self.path:
+            raise ValueError("archive destination must differ from active database path")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        with self._lock:
+            with self._connect() as source, sqlite3.connect(str(destination)) as target:
+                source.execute("PRAGMA wal_checkpoint(FULL)")
+                source.backup(target)
+
+            for candidate in _db_file_paths(self.path):
+                candidate.unlink(missing_ok=True)
+
+            self._init_db()
+
     def upsert_event(self, event: EventRecord) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -142,7 +158,7 @@ class Database:
             return conn.total_changes - before
 
     def get_event(self, event_slug: str) -> Optional[EventRecord]:
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM events WHERE event_slug = ?",
                 (event_slug,),
@@ -150,7 +166,7 @@ class Database:
         return _row_to_event(row) if row else None
 
     def get_event_by_condition(self, condition_id: str) -> Optional[EventRecord]:
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM events WHERE condition_id = ?",
                 (condition_id,),
@@ -158,7 +174,7 @@ class Database:
         return _row_to_event(row) if row else None
 
     def list_events(self, limit: int = 100) -> List[EventRecord]:
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM events ORDER BY start_ts DESC LIMIT ?",
                 (limit,),
@@ -173,18 +189,18 @@ class Database:
                 "SELECT * FROM events WHERE status = 'closed' OR end_ts <= ?"
             )
             params = (now_ts,)
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
         return [_row_to_event(row) for row in rows]
 
     def list_active_events(self, now_ts: Optional[int] = None) -> List[EventRecord]:
         if now_ts is None:
-            with self._connect() as conn:
+            with self._lock, self._connect() as conn:
                 rows = conn.execute(
                     "SELECT * FROM events WHERE status = 'active' ORDER BY start_ts ASC"
                 ).fetchall()
         else:
-            with self._connect() as conn:
+            with self._lock, self._connect() as conn:
                 rows = conn.execute(
                     "SELECT * FROM events WHERE status = 'active' OR end_ts >= ? ORDER BY start_ts ASC",
                     (now_ts,),
@@ -222,7 +238,7 @@ class Database:
         if limit is not None:
             limit_sql = " LIMIT ?"
             params.append(limit)
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             rows = conn.execute(
                 f"SELECT * FROM trades {where_sql} ORDER BY timestamp {order_sql}{limit_sql}",
                 params,
@@ -230,7 +246,7 @@ class Database:
         return [_row_to_trade(row) for row in rows]
 
     def count_trades_for_event(self, event_slug: str) -> int:
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS count FROM trades WHERE event_slug = ?",
                 (event_slug,),
@@ -238,7 +254,7 @@ class Database:
         return int(row["count"]) if row else 0
 
     def count_trades_by_asset(self, event_slug: str) -> dict:
-        with self._connect() as conn:
+        with self._lock, self._connect() as conn:
             rows = conn.execute(
                 """
                 SELECT asset_id, COUNT(*) AS count
@@ -249,6 +265,14 @@ class Database:
                 (event_slug,),
             ).fetchall()
         return {row["asset_id"]: int(row["count"]) for row in rows}
+
+
+def _db_file_paths(path: Path) -> List[Path]:
+    return [
+        path,
+        path.parent / f"{path.name}-wal",
+        path.parent / f"{path.name}-shm",
+    ]
 
 
 def _row_to_event(row: sqlite3.Row) -> EventRecord:
@@ -283,4 +307,3 @@ def _row_to_trade(row: sqlite3.Row) -> TradeRecord:
         timestamp=int(row["timestamp"]),
         transaction_hash=row["transaction_hash"],
     )
-

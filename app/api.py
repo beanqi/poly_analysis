@@ -42,6 +42,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         app.state.db = database
         app.state.settings = settings
+        app.state.archive_lock = asyncio.Lock()
         collector = None
         if enable_collector:
             collector = CollectorService(database, settings, realtime_hub=realtime_hub)
@@ -59,6 +60,7 @@ def create_app(
     app.state.settings = settings
     app.state.collector = None
     app.state.realtime_hub = realtime_hub
+    app.state.archive_lock = None
 
     @app.get("/api/health")
     def health():
@@ -174,6 +176,34 @@ def create_app(
         )
         return report
 
+    @app.post("/api/archive")
+    async def archive_stats():
+        archive_lock = app.state.archive_lock
+        if archive_lock is None:
+            archive_lock = asyncio.Lock()
+            app.state.archive_lock = archive_lock
+        if archive_lock.locked():
+            raise HTTPException(status_code=409, detail="archive already in progress")
+
+        async with archive_lock:
+            collector = app.state.collector
+            if collector is not None:
+                await collector.stop()
+
+            archive_path = _build_archive_path(app.state.db.path)
+            try:
+                app.state.db.archive_and_reset(archive_path)
+            finally:
+                if collector is not None:
+                    await collector.start()
+
+            await app.state.realtime_hub.publish({"type": "refresh", "reason": "archive"})
+            return {
+                "archive_path": str(archive_path),
+                "archive_file": archive_path.name,
+                "active_db_path": str(app.state.db.path),
+            }
+
     @app.get("/")
     def root():
         return FileResponse(STATIC_DIR / "index.html")
@@ -191,6 +221,20 @@ def _resolve_asset_id(event, outcome: Optional[str]) -> Optional[str]:
     if value in {"no", event.no_label.lower()}:
         return event.no_token_id
     return None
+
+
+def _build_archive_path(active_db_path: Path) -> Path:
+    active_db_path = Path(active_db_path)
+    archive_dir = active_db_path.parent / "archive"
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    suffix = active_db_path.suffix or ".sqlite3"
+    base_name = f"{active_db_path.stem}-{timestamp}"
+    candidate = archive_dir / f"{base_name}{suffix}"
+    counter = 2
+    while candidate.exists():
+        candidate = archive_dir / f"{base_name}-{counter}{suffix}"
+        counter += 1
+    return candidate
 
 
 app = create_app()
