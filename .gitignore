@@ -45,3 +45,6 @@ data/*.sqlite3-wal
 
 # Logs
 *.log
+
+# Local git worktrees
+.worktrees/
