@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Polymarket BTC 5m Monitor</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script src="https://unpkg.com/lightweight-charts@4.2.2/dist/lightweight-charts.standalone.production.js"></script>
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Polymarket</p>
+          <h1>BTC 5 分钟事件监控面板</h1>
+          <p class="subtitle">
+            自动采集 `btc-updown-5m-*` 事件、逐笔成交、双边 K 线，以及阈值策略历史胜率。
+          </p>
+        </div>
+        <div class="hero-meta">
+          <div class="meta-card">
+            <span>监控状态</span>
+            <strong id="health-status">加载中</strong>
+          </div>
+          <div class="meta-card">
+            <span>历史事件数</span>
+            <strong id="event-count">-</strong>
+          </div>
+          <div class="meta-card">
+            <span>统计样本事件</span>
+            <strong id="stats-event-count">-</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>事件列表</h2>
+          <p>最新 5 分钟 BTC 事件</p>
+        </div>
+        <div id="event-list" class="event-list"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2 id="selected-title">K 线</h2>
+          <p id="selected-range">-</p>
+        </div>
+        <div class="charts">
+          <div class="chart-card">
+            <div class="chart-title" id="yes-chart-title">YES</div>
+            <div id="yes-chart" class="chart"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-title" id="no-chart-title">NO</div>
+            <div id="no-chart" class="chart"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>逐笔成交</h2>
+          <p>当前选中事件最近成交</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>Outcome</th>
+                <th>方向</th>
+                <th>价格</th>
+                <th>数量</th>
+              </tr>
+            </thead>
+            <tbody id="trade-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>策略统计</h2>
+          <p>默认统计 10/20、20/40、30/60 三组阈值，按 1 分钟分桶。</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Outcome</th>
+                <th>时间段</th>
+                <th>买入</th>
+                <th>卖出</th>
+                <th>样本</th>
+                <th>胜利</th>
+                <th>失败</th>
+                <th>胜率</th>
+                <th>平均持仓秒数</th>
+              </tr>
+            </thead>
+            <tbody id="stats-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
