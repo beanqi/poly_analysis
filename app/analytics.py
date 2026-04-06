@@ -22,9 +22,12 @@ def build_candles(
     trades: Sequence[TradeRecord],
     asset_id: str,
     bucket_seconds: int = 5,
+    now_ts: int = None,
 ) -> List[dict]:
     if bucket_seconds <= 0:
         raise ValueError("bucket_seconds must be positive")
+    if now_ts is None:
+        now_ts = int(time.time())
 
     grouped: Dict[int, List[TradeRecord]] = defaultdict(list)
     for trade in sorted(trades, key=lambda item: item.timestamp):
@@ -56,7 +59,10 @@ def build_candles(
 
     candles = []
     first_bucket_time = min(candles_by_time)
-    last_bucket_time = max(first_bucket_time, event.end_ts - 1)
+    fill_end = event.end_ts - 1
+    if event.status != "closed":
+        fill_end = min(fill_end, now_ts - 1)
+    last_bucket_time = max(first_bucket_time, fill_end)
     previous_close = None
     for bucket_time in range(first_bucket_time, last_bucket_time + 1):
         candle = candles_by_time.get(bucket_time)

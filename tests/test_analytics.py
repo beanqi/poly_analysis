@@ -127,6 +127,7 @@ def test_build_candles_fills_empty_seconds_with_previous_close():
         trades=trades,
         asset_id=event.yes_token_id,
         bucket_seconds=1,
+        now_ts=1_006,
     )
 
     assert candles[:5] == [
@@ -176,6 +177,47 @@ def test_build_candles_fills_empty_seconds_with_previous_close():
             "trade_count": 0,
         },
     ]
+
+
+def test_build_candles_for_active_event_only_fills_to_now():
+    event = EventRecord(
+        event_id="evt-2",
+        event_slug="btc-updown-5m-2000",
+        market_id="mkt-2",
+        condition_id="cond-2",
+        title="BTC Up or Down - 5 Minutes",
+        question="BTC Up or Down - 5 Minutes",
+        start_ts=2_000,
+        end_ts=2_300,
+        yes_token_id="yes-2",
+        no_token_id="no-2",
+        status="active",
+    )
+    trades = [
+        TradeRecord(
+            trade_key="a2",
+            event_slug=event.event_slug,
+            condition_id=event.condition_id,
+            asset_id=event.yes_token_id,
+            outcome="Yes",
+            outcome_index=0,
+            side="BUY",
+            price=0.25,
+            size=5.0,
+            timestamp=2_001,
+            transaction_hash="0xa2",
+        )
+    ]
+
+    candles = build_candles(
+        event=event,
+        trades=trades,
+        asset_id=event.yes_token_id,
+        bucket_seconds=1,
+        now_ts=2_004,
+    )
+
+    assert [candle["time"] for candle in candles] == [2001, 2002, 2003]
 
 
 def test_compute_strategy_report_buckets_success_and_failure():

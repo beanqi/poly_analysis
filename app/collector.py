@@ -2,24 +2,25 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, Iterable, Optional, Set
+from typing import Dict, Optional, Set
 
 import websockets
 
 from app.config import Settings
 from app.db import Database
-from app.models import EventRecord
 from app.polymarket import PolymarketClient, parse_ws_trade
+from app.realtime import RealtimeHub
 
 
 logger = logging.getLogger(__name__)
 
 
 class CollectorService:
-    def __init__(self, db: Database, settings: Settings):
+    def __init__(self, db: Database, settings: Settings, realtime_hub: RealtimeHub = None):
         self.db = db
         self.settings = settings
         self.client = PolymarketClient(settings.gamma_url, settings.data_api_url)
+        self.realtime_hub = realtime_hub
         self._tasks = []
         self._stop_event = asyncio.Event()
         self._subscription_version = 0
@@ -58,8 +59,12 @@ class CollectorService:
                 asset_to_condition = {}
                 active_slugs = set()
                 now_ts = int(time.time())
+                events_changed = False
                 for event in events:
                     active_slugs.add(event.event_slug)
+                    existing = self.db.get_event(event.event_slug)
+                    if existing != event:
+                        events_changed = True
                     self.db.upsert_event(event)
                     desired_assets.update([event.yes_token_id, event.no_token_id])
                     asset_to_condition[event.yes_token_id] = event.condition_id
@@ -69,13 +74,17 @@ class CollectorService:
                 for event in self.db.list_active_events():
                     if event.event_slug not in active_slugs and event.end_ts <= now_ts:
                         self.db.update_event_status(event.event_slug, "closed")
+                        events_changed = True
 
                 if desired_assets != self._desired_assets:
                     self._desired_assets = desired_assets
                     self._asset_to_condition = asset_to_condition
                     self._subscription_version += 1
+                    events_changed = True
                 else:
                     self._asset_to_condition = asset_to_condition
+                if events_changed:
+                    await self._publish({"type": "refresh", "reason": "events"})
             except Exception:
                 logger.exception("event discovery failed")
             await asyncio.sleep(self.settings.discovery_interval_seconds)
@@ -97,9 +106,24 @@ class CollectorService:
                         event=event,
                         limit=self.settings.trade_fetch_limit,
                     )
-                    self.db.insert_trades(trades)
+                    inserted = self.db.insert_trades(trades)
+                    if inserted > 0:
+                        await self._publish(
+                            {
+                                "type": "refresh",
+                                "reason": "trade",
+                                "event_slug": event.event_slug,
+                            }
+                        )
                     if event.end_ts <= now_ts:
                         self.db.update_event_status(event.event_slug, "closed")
+                        await self._publish(
+                            {
+                                "type": "refresh",
+                                "reason": "status",
+                                "event_slug": event.event_slug,
+                            }
+                        )
             except Exception:
                 logger.exception("trade sync failed")
             await asyncio.sleep(self.settings.trade_sync_interval_seconds)
@@ -162,6 +186,28 @@ class CollectorService:
             if event is not None:
                 trade = parse_ws_trade(payload, event)
                 if trade is not None:
-                    self.db.insert_trades([trade])
+                    inserted = self.db.insert_trades([trade])
+                    if inserted > 0:
+                        self._publish_background(
+                            {
+                                "type": "refresh",
+                                "reason": "trade",
+                                "event_slug": event.event_slug,
+                            }
+                        )
         if condition_id:
             self._dirty_conditions.add(condition_id)
+
+    async def _publish(self, message: dict) -> None:
+        if self.realtime_hub is None:
+            return
+        await self.realtime_hub.publish(message)
+
+    def _publish_background(self, message: dict) -> None:
+        if self.realtime_hub is None:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self.realtime_hub.publish(message))

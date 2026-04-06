@@ -1,10 +1,12 @@
 import logging
 import time
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket
+from fastapi.websockets import WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,6 +20,7 @@ from app.analytics import (
 from app.collector import CollectorService
 from app.config import Settings, load_settings
 from app.db import Database
+from app.realtime import RealtimeHub
 
 
 logging.basicConfig(level=logging.INFO)
@@ -30,9 +33,11 @@ def create_app(
     database: Optional[Database] = None,
     settings: Optional[Settings] = None,
     enable_collector: bool = True,
+    realtime_hub: Optional[RealtimeHub] = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     database = database or Database(settings.db_path)
+    realtime_hub = realtime_hub or RealtimeHub()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -40,9 +45,10 @@ def create_app(
         app.state.settings = settings
         collector = None
         if enable_collector:
-            collector = CollectorService(database, settings)
+            collector = CollectorService(database, settings, realtime_hub=realtime_hub)
             await collector.start()
         app.state.collector = collector
+        app.state.realtime_hub = realtime_hub
         try:
             yield
         finally:
@@ -53,6 +59,7 @@ def create_app(
     app.state.db = database
     app.state.settings = settings
     app.state.collector = None
+    app.state.realtime_hub = realtime_hub
 
     @app.get("/api/health")
     def health():
@@ -122,6 +129,7 @@ def create_app(
             trades=trades,
             asset_id=asset_id,
             bucket_seconds=bucket_seconds,
+            now_ts=int(time.time()),
         )
         return {
             "event_slug": event_slug,
@@ -129,6 +137,24 @@ def create_app(
             "bucket_seconds": bucket_seconds,
             "candles": candles,
         }
+
+    @app.websocket("/ws")
+    async def websocket_updates(websocket: WebSocket):
+        await websocket.accept()
+        queue = await app.state.realtime_hub.subscribe()
+        try:
+            await websocket.send_json({"type": "connected", "server_ts": int(time.time())})
+            while True:
+                try:
+                    message = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    await websocket.send_json({"type": "ping", "server_ts": int(time.time())})
+                    continue
+                await websocket.send_json(message)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            await app.state.realtime_hub.unsubscribe(queue)
 
     @app.get("/api/stats")
     def get_stats():

@@ -49,6 +49,10 @@ const noSeries = noChart.addCandlestickSeries({
 });
 
 let selectedEventSlug = null;
+let ws = null;
+let reconnectTimer = null;
+let overviewRefreshTimer = null;
+let detailRefreshTimer = null;
 
 async function fetchJson(url) {
   const response = await fetch(url);
@@ -56,6 +60,15 @@ async function fetchJson(url) {
     throw new Error(`HTTP ${response.status}`);
   }
   return response.json();
+}
+
+function chooseDefaultEvent(events) {
+  return (
+    events.find((event) => event.status === "active" && event.trade_count > 0)?.event_slug ||
+    events.find((event) => event.trade_count > 0)?.event_slug ||
+    events[0]?.event_slug ||
+    null
+  );
 }
 
 function toChartData(candles) {
@@ -134,6 +147,9 @@ function renderStats(rows) {
 
 async function loadEventDetail() {
   if (!selectedEventSlug) {
+    yesSeries.setData([]);
+    noSeries.setData([]);
+    tradeTableBody.innerHTML = "";
     return;
   }
   const [detail, yesCandles, noCandles, trades] = await Promise.all([
@@ -168,8 +184,10 @@ async function refresh() {
     renderStats(statsPayload.rows);
 
     const events = eventsPayload.events;
-    if (!selectedEventSlug && events.length) {
-      selectedEventSlug = events[0].event_slug;
+    if (!events.some((event) => event.event_slug === selectedEventSlug)) {
+      selectedEventSlug = chooseDefaultEvent(events);
+    } else if (!selectedEventSlug && events.length) {
+      selectedEventSlug = chooseDefaultEvent(events);
     }
     renderEvents(events);
     await loadEventDetail();
@@ -177,6 +195,94 @@ async function refresh() {
     console.error(error);
     healthStatus.textContent = "加载失败";
   }
+}
+
+async function refreshWithoutStats() {
+  try {
+    const [health, eventsPayload] = await Promise.all([
+      fetchJson("/api/health"),
+      fetchJson("/api/events"),
+    ]);
+    healthStatus.textContent = health.collector_enabled ? "采集中" : "只读";
+    eventCount.textContent = String(eventsPayload.events.length);
+    const events = eventsPayload.events;
+    if (!events.some((event) => event.event_slug === selectedEventSlug)) {
+      selectedEventSlug = chooseDefaultEvent(events);
+    } else if (!selectedEventSlug && events.length) {
+      selectedEventSlug = chooseDefaultEvent(events);
+    }
+    renderEvents(events);
+    await loadEventDetail();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function scheduleOverviewRefresh(includeStats) {
+  if (overviewRefreshTimer) {
+    clearTimeout(overviewRefreshTimer);
+  }
+  overviewRefreshTimer = setTimeout(() => {
+    overviewRefreshTimer = null;
+    if (includeStats) {
+      void refresh();
+      return;
+    }
+    void refreshWithoutStats();
+  }, 400);
+}
+
+function scheduleDetailRefresh() {
+  if (detailRefreshTimer) {
+    clearTimeout(detailRefreshTimer);
+  }
+  detailRefreshTimer = setTimeout(() => {
+    detailRefreshTimer = null;
+    void loadEventDetail();
+  }, 250);
+}
+
+function connectRealtime() {
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${protocol}://${window.location.host}/ws`);
+
+  ws.onopen = () => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    healthStatus.textContent = "实时连接中";
+  };
+
+  ws.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    if (message.type === "connected") {
+      healthStatus.textContent = "实时已连接";
+      return;
+    }
+    if (message.type === "ping") {
+      return;
+    }
+    if (message.type === "refresh") {
+      if (message.reason === "trade") {
+        scheduleOverviewRefresh(false);
+        if (!message.event_slug || message.event_slug === selectedEventSlug) {
+          scheduleDetailRefresh();
+        }
+        return;
+      }
+      scheduleOverviewRefresh(true);
+    }
+  };
+
+  ws.onclose = () => {
+    healthStatus.textContent = "实时断开，重连中";
+    reconnectTimer = setTimeout(connectRealtime, 1500);
+  };
+
+  ws.onerror = () => {
+    ws.close();
+  };
 }
 
 const resizeCharts = () => {
@@ -189,4 +295,5 @@ window.addEventListener("resize", resizeCharts);
 
 await refresh();
 resizeCharts();
-setInterval(refresh, 10000);
+connectRealtime();
+setInterval(refresh, 30000);
