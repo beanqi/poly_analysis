@@ -299,3 +299,39 @@ def test_compute_strategy_report_buckets_success_and_failure():
     assert no_row["win_rate"] == 0.0
     assert combined_row["sample_size"] == 1
     assert combined_row["wins"] == 1
+
+
+def test_compute_strategy_report_uses_explicit_strategy_pairs_and_groups():
+    event = make_event()
+
+    report = compute_strategy_report(
+        events=[event],
+        trades=[],
+    )
+
+    strategy_pairs = {
+        (row["buy_threshold_cents"], row["sell_threshold_cents"])
+        for row in report["rows"]
+    }
+    assert strategy_pairs == {
+        (10, 20),
+        (20, 40),
+        (30, 60),
+        (30, 70),
+        (30, 80),
+        (30, 90),
+    }
+
+    assert [group["buy_threshold_cents"] for group in report["groups"]] == [10, 20, 30]
+    buy_30_group = next(
+        group for group in report["groups"] if group["buy_threshold_cents"] == 30
+    )
+    assert [strategy["sell_threshold_cents"] for strategy in buy_30_group["strategies"]] == [
+        60,
+        70,
+        80,
+        90,
+    ]
+    first_bucket = buy_30_group["strategies"][0]["buckets"][0]
+    assert first_bucket["bucket"] == "0-1m"
+    assert [row["outcome"] for row in first_bucket["rows"]] == ["Yes", "No", "Combined"]

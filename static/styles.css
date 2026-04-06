@@ -97,6 +97,12 @@ h1, h2 {
   margin-bottom: 16px;
 }
 
+.panel-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: center;
+}
+
 .event-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
@@ -119,6 +125,31 @@ h1, h2 {
 .event-item.active {
   border-color: rgba(163, 77, 45, 0.55);
   background: rgba(163, 77, 45, 0.08);
+}
+
+.event-divider {
+  grid-column: 1 / -1;
+  padding: 6px 4px 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.ghost-button {
+  border: 1px solid rgba(163, 77, 45, 0.28);
+  border-radius: 999px;
+  background: rgba(163, 77, 45, 0.08);
+  color: var(--accent);
+  padding: 10px 18px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ghost-button[disabled] {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .charts {
@@ -166,13 +197,96 @@ thead th {
   font-weight: 600;
 }
 
+.stats-groups {
+  display: grid;
+  gap: 18px;
+}
+
+.stats-buy-group {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.4);
+  padding: 16px;
+}
+
+.stats-buy-header,
+.stats-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 12px;
+}
+
+.stats-buy-header {
+  margin-bottom: 14px;
+}
+
+.stats-buy-eyebrow {
+  margin: 0 0 4px;
+  color: var(--accent);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.stats-buy-header h3,
+.stats-card-header h4 {
+  margin: 0;
+  font-family: "IBM Plex Serif", "Noto Serif SC", serif;
+}
+
+.stats-buy-header span,
+.stats-card-header span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.stats-strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+
+.stats-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 14px;
+}
+
+.stats-card-header {
+  margin-bottom: 12px;
+}
+
+.stats-table tbody tr.is-combined {
+  background: rgba(163, 77, 45, 0.08);
+}
+
+.empty-state {
+  border: 1px dashed rgba(163, 77, 45, 0.25);
+  border-radius: 16px;
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.35);
+}
+
 @media (max-width: 980px) {
   .hero {
     flex-direction: column;
   }
 
   .hero-meta,
-  .charts {
+  .charts,
+  .stats-strategy-grid {
     grid-template-columns: 1fr;
+  }
+
+  .stats-buy-header,
+  .stats-card-header,
+  .panel-header {
+    align-items: start;
+    flex-direction: column;
   }
 }

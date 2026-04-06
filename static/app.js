@@ -4,12 +4,13 @@ const healthStatus = document.getElementById("health-status");
 const eventCount = document.getElementById("event-count");
 const statsEventCount = document.getElementById("stats-event-count");
 const eventList = document.getElementById("event-list");
+const eventToggle = document.getElementById("event-toggle");
 const selectedTitle = document.getElementById("selected-title");
 const selectedRange = document.getElementById("selected-range");
 const yesChartTitle = document.getElementById("yes-chart-title");
 const noChartTitle = document.getElementById("no-chart-title");
 const tradeTableBody = document.getElementById("trade-table-body");
-const statsTableBody = document.getElementById("stats-table-body");
+const statsGroups = document.getElementById("stats-groups");
 
 const chartOptions = {
   layout: {
@@ -53,6 +54,9 @@ let ws = null;
 let reconnectTimer = null;
 let overviewRefreshTimer = null;
 let detailRefreshTimer = null;
+let showAllEvents = false;
+
+const VISIBLE_EVENT_COUNT = 10;
 
 async function fetchJson(url) {
   const response = await fetch(url);
@@ -85,27 +89,73 @@ function formatTs(timestamp) {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
+function formatPercent(value) {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function isSelectedInHistory(events) {
+  return events.slice(VISIBLE_EVENT_COUNT).some((event) => event.event_slug === selectedEventSlug);
+}
+
+function createEventButton(event, events) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "event-item";
+  if (event.event_slug === selectedEventSlug) {
+    button.classList.add("active");
+  }
+  button.innerHTML = `
+    <strong>${event.title}</strong>
+    <span>${formatTs(event.start_ts)} - ${formatTs(event.end_ts)}</span>
+    <small>${event.trade_count} 笔成交</small>
+  `;
+  button.addEventListener("click", () => {
+    selectedEventSlug = event.event_slug;
+    renderEvents(events);
+    void loadEventDetail();
+  });
+  return button;
+}
+
 function renderEvents(events) {
   eventList.innerHTML = "";
-  events.forEach((event) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "event-item";
-    if (event.event_slug === selectedEventSlug) {
-      button.classList.add("active");
-    }
-    button.innerHTML = `
-      <strong>${event.title}</strong>
-      <span>${formatTs(event.start_ts)} - ${formatTs(event.end_ts)}</span>
-      <small>${event.trade_count} 笔成交</small>
-    `;
-    button.addEventListener("click", () => {
-      selectedEventSlug = event.event_slug;
-      renderEvents(events);
-      loadEventDetail();
-    });
-    eventList.appendChild(button);
+
+  const recentEvents = events.slice(0, VISIBLE_EVENT_COUNT);
+  const historyEvents = events.slice(VISIBLE_EVENT_COUNT);
+  const autoExpanded = !showAllEvents && isSelectedInHistory(events);
+  const expanded = showAllEvents || autoExpanded;
+
+  recentEvents.forEach((event) => {
+    eventList.appendChild(createEventButton(event, events));
   });
+
+  if (expanded && historyEvents.length) {
+    const divider = document.createElement("div");
+    divider.className = "event-divider";
+    divider.textContent = "更早的历史事件";
+    eventList.appendChild(divider);
+    historyEvents.forEach((event) => {
+      eventList.appendChild(createEventButton(event, events));
+    });
+  }
+
+  if (!historyEvents.length) {
+    eventToggle.hidden = true;
+    eventToggle.disabled = false;
+    return;
+  }
+
+  eventToggle.hidden = false;
+  eventToggle.disabled = autoExpanded;
+  eventToggle.textContent = autoExpanded
+    ? "历史事件已展开（当前选中事件在其中）"
+    : expanded
+      ? "收起历史事件"
+      : `展开其余 ${historyEvents.length} 个事件`;
+  eventToggle.onclick = () => {
+    showAllEvents = !expanded;
+    renderEvents(events);
+  };
 }
 
 function renderTrades(trades) {
@@ -126,22 +176,89 @@ function renderTrades(trades) {
     });
 }
 
-function renderStats(rows) {
-  statsTableBody.innerHTML = "";
-  rows.forEach((row) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${row.outcome}</td>
-      <td>${row.bucket}</td>
-      <td>${row.buy_threshold_cents}¢</td>
-      <td>${row.sell_threshold_cents}¢</td>
-      <td>${row.sample_size}</td>
-      <td>${row.wins}</td>
-      <td>${row.losses}</td>
-      <td>${(row.win_rate * 100).toFixed(1)}%</td>
-      <td>${row.avg_hold_seconds === null ? "-" : row.avg_hold_seconds}</td>
+function renderStats(groups) {
+  statsGroups.innerHTML = "";
+
+  if (!groups.length) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state";
+    emptyState.textContent = "暂无可展示的策略统计";
+    statsGroups.appendChild(emptyState);
+    return;
+  }
+
+  groups.forEach((group) => {
+    const section = document.createElement("section");
+    section.className = "stats-buy-group";
+    section.innerHTML = `
+      <div class="stats-buy-header">
+        <div>
+          <p class="stats-buy-eyebrow">按买入价分组</p>
+          <h3>${group.label}</h3>
+        </div>
+        <span>${group.strategies.length} 个卖出策略</span>
+      </div>
     `;
-    statsTableBody.appendChild(tr);
+
+    const strategyGrid = document.createElement("div");
+    strategyGrid.className = "stats-strategy-grid";
+
+    group.strategies.forEach((strategy) => {
+      const card = document.createElement("article");
+      card.className = "stats-card";
+      card.innerHTML = `
+        <div class="stats-card-header">
+          <h4>${strategy.label}</h4>
+          <span>${strategy.buckets.length} 个时间段</span>
+        </div>
+      `;
+
+      const tableWrap = document.createElement("div");
+      tableWrap.className = "table-wrap";
+      const table = document.createElement("table");
+      table.className = "stats-table";
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>时间段</th>
+            <th>Outcome</th>
+            <th>样本</th>
+            <th>胜利</th>
+            <th>失败</th>
+            <th>胜率</th>
+            <th>平均持仓秒数</th>
+          </tr>
+        </thead>
+      `;
+
+      const tbody = document.createElement("tbody");
+      strategy.buckets.forEach((bucket) => {
+        bucket.rows.forEach((row) => {
+          const tr = document.createElement("tr");
+          if (row.outcome === "Combined") {
+            tr.classList.add("is-combined");
+          }
+          tr.innerHTML = `
+            <td>${bucket.bucket}</td>
+            <td>${row.outcome}</td>
+            <td>${row.sample_size}</td>
+            <td>${row.wins}</td>
+            <td>${row.losses}</td>
+            <td>${formatPercent(row.win_rate)}</td>
+            <td>${row.avg_hold_seconds === null ? "-" : row.avg_hold_seconds}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      });
+
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      card.appendChild(tableWrap);
+      strategyGrid.appendChild(card);
+    });
+
+    section.appendChild(strategyGrid);
+    statsGroups.appendChild(section);
   });
 }
 
@@ -180,8 +297,8 @@ async function refresh() {
 
     healthStatus.textContent = health.collector_enabled ? "采集中" : "只读";
     eventCount.textContent = String(eventsPayload.events.length);
-    statsEventCount.textContent = String(statsPayload.meta.event_count);
-    renderStats(statsPayload.rows);
+    statsEventCount.textContent = String(statsPayload.meta.events_with_samples);
+    renderStats(statsPayload.groups || []);
 
     const events = eventsPayload.events;
     if (!events.some((event) => event.event_slug === selectedEventSlug)) {

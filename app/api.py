@@ -12,8 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.analytics import (
     DEFAULT_BUCKETS,
-    DEFAULT_BUY_THRESHOLDS,
-    DEFAULT_SELL_THRESHOLDS,
+    DEFAULT_STRATEGY_PAIRS,
     build_candles,
     compute_strategy_report,
 )
@@ -169,8 +168,7 @@ def create_app(
         report = compute_strategy_report(
             events=events,
             trades=trades,
-            buy_thresholds=DEFAULT_BUY_THRESHOLDS,
-            sell_thresholds=DEFAULT_SELL_THRESHOLDS,
+            strategy_pairs=DEFAULT_STRATEGY_PAIRS,
             buckets=DEFAULT_BUCKETS,
             now_ts=now_ts,
         )

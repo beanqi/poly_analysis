@@ -114,3 +114,13 @@ def test_dashboard_endpoints_return_expected_shape(tmp_path):
     stats_payload = stats_resp.json()
     assert stats_payload["meta"]["event_count"] == 1
     assert any(row["buy_threshold_cents"] == 20 for row in stats_payload["rows"])
+    assert [group["buy_threshold_cents"] for group in stats_payload["groups"]] == [10, 20, 30]
+    buy_30_group = next(
+        group for group in stats_payload["groups"] if group["buy_threshold_cents"] == 30
+    )
+    assert [strategy["sell_threshold_cents"] for strategy in buy_30_group["strategies"]] == [
+        60,
+        70,
+        80,
+        90,
+    ]

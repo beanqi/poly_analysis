@@ -39,6 +39,9 @@
           <p>最新 5 分钟 BTC 事件</p>
         </div>
         <div id="event-list" class="event-list"></div>
+        <div class="panel-actions">
+          <button id="event-toggle" class="ghost-button" type="button" hidden></button>
+        </div>
       </section>
 
       <section class="panel">
@@ -82,26 +85,9 @@
       <section class="panel">
         <div class="panel-header">
           <h2>策略统计</h2>
-          <p>默认统计 10/20、20/40、30/60 三组阈值，按 1 分钟分桶。</p>
+          <p>默认统计 10/20、20/40、30/60、30/70、30/80、30/90，按买入价分组展示。</p>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Outcome</th>
-                <th>时间段</th>
-                <th>买入</th>
-                <th>卖出</th>
-                <th>样本</th>
-                <th>胜利</th>
-                <th>失败</th>
-                <th>胜率</th>
-                <th>平均持仓秒数</th>
-              </tr>
-            </thead>
-            <tbody id="stats-table-body"></tbody>
-          </table>
-        </div>
+        <div id="stats-groups" class="stats-groups"></div>
       </section>
     </main>
 

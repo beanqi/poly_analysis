@@ -1,13 +1,21 @@
 import math
 import time
 from collections import defaultdict
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from app.models import EventRecord, TradeRecord
 
 
-DEFAULT_BUY_THRESHOLDS = [0.10, 0.20, 0.30]
-DEFAULT_SELL_THRESHOLDS = [0.20, 0.40, 0.60]
+DEFAULT_STRATEGY_PAIRS = [
+    (0.10, 0.20),
+    (0.20, 0.40),
+    (0.30, 0.60),
+    (0.30, 0.70),
+    (0.30, 0.80),
+    (0.30, 0.90),
+]
+DEFAULT_BUY_THRESHOLDS = sorted({buy for buy, _ in DEFAULT_STRATEGY_PAIRS})
+DEFAULT_SELL_THRESHOLDS = sorted({sell for _, sell in DEFAULT_STRATEGY_PAIRS})
 DEFAULT_BUCKETS = [
     (0, 60, "0-1m"),
     (60, 120, "1-2m"),
@@ -88,8 +96,9 @@ def build_candles(
 def compute_strategy_report(
     events: Sequence[EventRecord],
     trades: Sequence[TradeRecord],
-    buy_thresholds: Sequence[float] = DEFAULT_BUY_THRESHOLDS,
-    sell_thresholds: Sequence[float] = DEFAULT_SELL_THRESHOLDS,
+    buy_thresholds: Optional[Sequence[float]] = None,
+    sell_thresholds: Optional[Sequence[float]] = None,
+    strategy_pairs: Optional[Sequence[Tuple[float, float]]] = None,
     buckets: Sequence[Tuple[int, int, str]] = DEFAULT_BUCKETS,
     now_ts: int = None,
 ) -> dict:
@@ -106,80 +115,71 @@ def compute_strategy_report(
     for trade in sorted(trades, key=lambda item: item.timestamp):
         trades_by_event_asset[(trade.event_slug, trade.asset_id)].append(trade)
 
+    strategy_pairs = _normalize_strategy_pairs(
+        buy_thresholds=buy_thresholds,
+        sell_thresholds=sell_thresholds,
+        strategy_pairs=strategy_pairs,
+    )
     counters = {}
     sample_events = set()
     for event in eligible_events:
-        for buy_threshold in buy_thresholds:
-            for sell_threshold in sell_thresholds:
-                if sell_threshold <= buy_threshold:
-                    continue
-                for bucket_start, bucket_end, bucket_label in buckets:
-                    for side_label, asset_id in (
-                        ("Yes", event.yes_token_id),
-                        ("No", event.no_token_id),
-                    ):
-                        key = (side_label, bucket_label, buy_threshold, sell_threshold)
-                        counters.setdefault(
-                            key,
-                            {
-                                "sample_size": 0,
-                                "wins": 0,
-                                "losses": 0,
-                                "total_hold_seconds": 0,
-                            },
-                        )
-                        result = _simulate_bucket_trade(
-                            event=event,
-                            trades=trades_by_event_asset.get((event.event_slug, asset_id), []),
-                            bucket_start=bucket_start,
-                            bucket_end=bucket_end,
-                            buy_threshold=buy_threshold,
-                            sell_threshold=sell_threshold,
-                        )
-                        if result is None:
-                            continue
-                        counters[key]["sample_size"] += 1
-                        sample_events.add(event.event_slug)
-                        if result["success"]:
-                            counters[key]["wins"] += 1
-                            counters[key]["total_hold_seconds"] += result["hold_seconds"]
-                        else:
-                            counters[key]["losses"] += 1
+        for buy_threshold, sell_threshold in strategy_pairs:
+            for bucket_start, bucket_end, bucket_label in buckets:
+                for side_label, asset_id in (
+                    ("Yes", event.yes_token_id),
+                    ("No", event.no_token_id),
+                ):
+                    key = (side_label, bucket_label, buy_threshold, sell_threshold)
+                    counters.setdefault(key, _empty_metrics())
+                    result = _simulate_bucket_trade(
+                        event=event,
+                        trades=trades_by_event_asset.get((event.event_slug, asset_id), []),
+                        bucket_start=bucket_start,
+                        bucket_end=bucket_end,
+                        buy_threshold=buy_threshold,
+                        sell_threshold=sell_threshold,
+                    )
+                    if result is None:
+                        continue
+                    counters[key]["sample_size"] += 1
+                    sample_events.add(event.event_slug)
+                    if result["success"]:
+                        counters[key]["wins"] += 1
+                        counters[key]["total_hold_seconds"] += result["hold_seconds"]
+                    else:
+                        counters[key]["losses"] += 1
 
     rows = []
-    for buy_threshold in buy_thresholds:
-        for sell_threshold in sell_thresholds:
-            if sell_threshold <= buy_threshold:
-                continue
-            for _, _, bucket_label in buckets:
-                combined = {"sample_size": 0, "wins": 0, "losses": 0, "total_hold_seconds": 0}
-                for side_label in ("Yes", "No"):
-                    metrics = counters.get(
-                        (side_label, bucket_label, buy_threshold, sell_threshold),
-                        {"sample_size": 0, "wins": 0, "losses": 0, "total_hold_seconds": 0},
-                    )
-                    rows.append(
-                        _format_row(
-                            outcome=side_label,
-                            bucket_label=bucket_label,
-                            buy_threshold=buy_threshold,
-                            sell_threshold=sell_threshold,
-                            metrics=metrics,
-                        )
-                    )
-                    combined["sample_size"] += metrics["sample_size"]
-                    combined["wins"] += metrics["wins"]
-                    combined["losses"] += metrics["losses"]
-                    combined["total_hold_seconds"] += metrics["total_hold_seconds"]
+    for buy_threshold, sell_threshold in strategy_pairs:
+        for _, _, bucket_label in buckets:
+            combined = _empty_metrics()
+            for side_label in ("Yes", "No"):
+                metrics = counters.get(
+                    (side_label, bucket_label, buy_threshold, sell_threshold),
+                    _empty_metrics(),
+                )
                 rows.append(
                     _format_row(
-                        outcome="Combined",
+                        outcome=side_label,
                         bucket_label=bucket_label,
                         buy_threshold=buy_threshold,
                         sell_threshold=sell_threshold,
-                        metrics=combined,
+                        metrics=metrics,
                     )
                 )
+                combined["sample_size"] += metrics["sample_size"]
+                combined["wins"] += metrics["wins"]
+                combined["losses"] += metrics["losses"]
+                combined["total_hold_seconds"] += metrics["total_hold_seconds"]
+            rows.append(
+                _format_row(
+                    outcome="Combined",
+                    bucket_label=bucket_label,
+                    buy_threshold=buy_threshold,
+                    sell_threshold=sell_threshold,
+                    metrics=combined,
+                )
+            )
 
     rows.sort(
         key=lambda row: (
@@ -189,16 +189,26 @@ def compute_strategy_report(
             0 if row["outcome"] == "Yes" else 1 if row["outcome"] == "No" else 2,
         )
     )
+    buy_thresholds_cents = sorted({int(round(buy * 100)) for buy, _ in strategy_pairs})
+    sell_thresholds_cents = sorted({int(round(sell * 100)) for _, sell in strategy_pairs})
 
     return {
         "meta": {
             "event_count": len(eligible_events),
             "events_with_samples": len(sample_events),
-            "buy_thresholds_cents": [int(round(value * 100)) for value in buy_thresholds],
-            "sell_thresholds_cents": [int(round(value * 100)) for value in sell_thresholds],
+            "buy_thresholds_cents": buy_thresholds_cents,
+            "sell_thresholds_cents": sell_thresholds_cents,
+            "strategy_pairs_cents": [
+                {
+                    "buy_threshold_cents": int(round(buy * 100)),
+                    "sell_threshold_cents": int(round(sell * 100)),
+                }
+                for buy, sell in strategy_pairs
+            ],
             "buckets": [label for _, _, label in buckets],
         },
         "rows": rows,
+        "groups": _group_rows(rows=rows, buckets=buckets),
     }
 
 
@@ -264,6 +274,79 @@ def _format_row(
         "avg_hold_seconds": (
             None if avg_hold_seconds is None else round(avg_hold_seconds, 2)
         ),
+    }
+
+
+def _normalize_strategy_pairs(
+    buy_thresholds: Optional[Sequence[float]],
+    sell_thresholds: Optional[Sequence[float]],
+    strategy_pairs: Optional[Sequence[Tuple[float, float]]],
+) -> List[Tuple[float, float]]:
+    if strategy_pairs is not None:
+        return sorted(set(strategy_pairs))
+    if buy_thresholds is not None and sell_thresholds is not None:
+        return sorted(
+            {
+                (buy_threshold, sell_threshold)
+                for buy_threshold in buy_thresholds
+                for sell_threshold in sell_thresholds
+                if sell_threshold > buy_threshold
+            }
+        )
+    return list(DEFAULT_STRATEGY_PAIRS)
+
+
+def _group_rows(rows: Sequence[dict], buckets: Sequence[Tuple[int, int, str]]) -> List[dict]:
+    buy_groups: Dict[int, Dict[int, Dict[str, List[dict]]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(list))
+    )
+    for row in rows:
+        buy_groups[row["buy_threshold_cents"]][row["sell_threshold_cents"]][row["bucket"]].append(
+            row
+        )
+
+    groups = []
+    for buy_threshold_cents in sorted(buy_groups):
+        strategies = []
+        for sell_threshold_cents in sorted(buy_groups[buy_threshold_cents]):
+            bucket_rows = buy_groups[buy_threshold_cents][sell_threshold_cents]
+            strategies.append(
+                {
+                    "label": f"{buy_threshold_cents}买 / {sell_threshold_cents}卖",
+                    "buy_threshold_cents": buy_threshold_cents,
+                    "sell_threshold_cents": sell_threshold_cents,
+                    "buckets": [
+                        {
+                            "bucket": bucket_label,
+                            "rows": sorted(
+                                bucket_rows.get(bucket_label, []),
+                                key=lambda row: (
+                                    0
+                                    if row["outcome"] == "Yes"
+                                    else 1 if row["outcome"] == "No" else 2
+                                ),
+                            ),
+                        }
+                        for _, _, bucket_label in buckets
+                    ],
+                }
+            )
+        groups.append(
+            {
+                "label": f"{buy_threshold_cents}买入",
+                "buy_threshold_cents": buy_threshold_cents,
+                "strategies": strategies,
+            }
+        )
+    return groups
+
+
+def _empty_metrics() -> dict:
+    return {
+        "sample_size": 0,
+        "wins": 0,
+        "losses": 0,
+        "total_hold_seconds": 0,
     }
 
 
