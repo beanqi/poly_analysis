@@ -315,7 +315,11 @@ def test_compute_strategy_report_uses_explicit_strategy_pairs_and_groups():
     }
     assert strategy_pairs == {
         (10, 20),
-        (20, 40),
+        (10, 30),
+        (10, 40),
+        (20, 30),
+        (20, 50),
+        (20, 60),
         (30, 60),
         (30, 70),
         (30, 80),
@@ -323,6 +327,22 @@ def test_compute_strategy_report_uses_explicit_strategy_pairs_and_groups():
     }
 
     assert [group["buy_threshold_cents"] for group in report["groups"]] == [10, 20, 30]
+    buy_10_group = next(
+        group for group in report["groups"] if group["buy_threshold_cents"] == 10
+    )
+    assert [strategy["sell_threshold_cents"] for strategy in buy_10_group["strategies"]] == [
+        20,
+        30,
+        40,
+    ]
+    buy_20_group = next(
+        group for group in report["groups"] if group["buy_threshold_cents"] == 20
+    )
+    assert [strategy["sell_threshold_cents"] for strategy in buy_20_group["strategies"]] == [
+        30,
+        50,
+        60,
+    ]
     buy_30_group = next(
         group for group in report["groups"] if group["buy_threshold_cents"] == 30
     )

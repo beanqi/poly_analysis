@@ -6,13 +6,16 @@ from typing import Dict, List, Optional, Sequence, Tuple
 from app.models import EventRecord, TradeRecord
 
 
+# Keep the default strategy config aligned with the UI buy-price grouping.
+DEFAULT_STRATEGY_GROUPS = {
+    0.10: (0.20, 0.30, 0.40),
+    0.20: (0.30, 0.50, 0.60),
+    0.30: (0.60, 0.70, 0.80, 0.90),
+}
 DEFAULT_STRATEGY_PAIRS = [
-    (0.10, 0.20),
-    (0.20, 0.40),
-    (0.30, 0.60),
-    (0.30, 0.70),
-    (0.30, 0.80),
-    (0.30, 0.90),
+    (buy_threshold, sell_threshold)
+    for buy_threshold, sell_thresholds in DEFAULT_STRATEGY_GROUPS.items()
+    for sell_threshold in sell_thresholds
 ]
 DEFAULT_BUY_THRESHOLDS = sorted({buy for buy, _ in DEFAULT_STRATEGY_PAIRS})
 DEFAULT_SELL_THRESHOLDS = sorted({sell for _, sell in DEFAULT_STRATEGY_PAIRS})
